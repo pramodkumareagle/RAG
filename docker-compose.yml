@@ -1,0 +1,64 @@
+version: "3.8"
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: ragpass
+      POSTGRES_DB: rag
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: ./services/api
+    env_file: .env
+    environment:
+      QDRANT_URL: "http://qdrant:6333"
+      PG_DSN: "postgresql://rag:ragpass@postgres:5432/rag"
+      INDEX_NAME: "docs"
+      EMBED_MODEL: "sentence-transformers/all-MiniLM-L6-v2"
+    depends_on:
+      - qdrant
+      - postgres
+    ports:
+      - "8000:8000"
+
+  ingest:
+    build:
+      context: ./services/ingest
+    env_file: .env
+    environment:
+      QDRANT_URL: "http://qdrant:6333"
+      PG_DSN: "postgresql://rag:ragpass@postgres:5432/rag"
+      INDEX_NAME: "docs"
+      EMBED_MODEL: "sentence-transformers/all-MiniLM-L6-v2"
+    depends_on:
+      - qdrant
+    entrypoint: ["python", "ingest.py"]
+
+  ui:
+    build:
+      context: ./ui
+    env_file: .env
+    environment:
+      API_BASE: "http://api:8000"
+    depends_on:
+      - api
+    ports:
+      - "8501:8501"
+
+volumes:
+  qdrant_data: {}
+  pgdata: {}
