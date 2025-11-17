@@ -1,6 +1,17 @@
 FROM python:3.11-slim
+
 WORKDIR /workspace
-COPY requirements.txt ./
+
+# Install deps
+COPY services/ingest/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY ingest.py ./
-CMD ["python", "ingest.py"]
+
+# Copy shared core code
+COPY core /workspace/core
+
+# Copy ingestion script
+COPY services/ingest/ingest.py /workspace/ingest.py
+
+ENV PYTHONPATH=/workspace
+
+ENTRYPOINT ["python", "ingest.py"]

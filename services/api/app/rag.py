@@ -5,11 +5,11 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 from sentence_transformers import SentenceTransformer
 
-INDEX_NAME = os.getenv("QDRANT_INDEX_NAME", "doc")
-QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-EMBED_MODEL = os.getenv("EMBED_MODEL_NAME", "all-MiniLM-L6-v2")
+INDEX_NAME   = os.getenv("QDRANT_INDEX_NAME", "doc")
+QDRANT_URL   = os.getenv("QDRANT_URL", "http://localhost:6333")
+EMBED_MODEL  = os.getenv("EMBED_MODEL_NAME", "all-MiniLM-L6-v2")
 
-model = SentenceTransformer(EMBED_MODEL)
+model  = SentenceTransformer(EMBED_MODEL)
 client = QdrantClient(url=QDRANT_URL)
 
 def ensure_collection(dim: int = 384):

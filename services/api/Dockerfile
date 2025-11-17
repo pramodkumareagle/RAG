@@ -1,17 +1,20 @@
 FROM python:3.11-slim
 
-# Create and set working directory
+# Where our app will live in the container
 WORKDIR /app
 
-# Copy dependency list and install packages
-COPY requirements.txt ./
+# Install dependencies
+COPY services/api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the application code
-COPY app ./app
+# Copy shared core code
+COPY core /app/core
 
-# Expose FastAPI port
-EXPOSE 8000
+# Copy API app code
+COPY services/api/app /app/app
 
-# Start the FastAPI app
+# So "core" & "app" are importable as top-level packages
+ENV PYTHONPATH=/app
+
+# Run FastAPI with uvicorn, listening on all interfaces
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

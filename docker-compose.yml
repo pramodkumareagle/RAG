@@ -1,22 +1,16 @@
+version: "3.8"
+
 services:
   qdrant:
     image: qdrant/qdrant:latest
-    restart: unless-stopped
     ports:
       - "6333:6333"
       - "6334:6334"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:6333/health"]
-      interval: 90s
-      timeout: 30s
-      retries: 5
-      start_period: 30s
     volumes:
       - qdrant_data:/qdrant/storage
 
   postgres:
     image: postgres:16
-    restart: unless-stopped
     environment:
       POSTGRES_USER: rag
       POSTGRES_PASSWORD: ragpass
@@ -28,12 +22,13 @@ services:
 
   api:
     build:
-      context: ./services/api
-    restart: unless-stopped
+      context: .
+      dockerfile: services/api/Dockerfile
     env_file: .env
     environment:
       QDRANT_URL: "http://qdrant:6333"
-      PG_DSN: "postgresql://rag:ragpass@postgres:5432/rag"
+      QDRANT_INDEX_NAME: "docs"
+      EMBED_MODEL_NAME: "sentence-transformers/all-MiniLM-L6-v2"
       INDEX_NAME: "docs"
       EMBED_MODEL: "sentence-transformers/all-MiniLM-L6-v2"
     depends_on:
@@ -42,24 +37,27 @@ services:
     ports:
       - "8000:8000"
 
+
   ingest:
     build:
-      context: ./services/ingest
-    restart: "no"   # runs one time if triggered manually
+      context: .
+      dockerfile: services/ingest/Dockerfile
     env_file: .env
     environment:
       QDRANT_URL: "http://qdrant:6333"
-      PG_DSN: "postgresql://rag:ragpass@postgres:5432/rag"
       INDEX_NAME: "docs"
       EMBED_MODEL: "sentence-transformers/all-MiniLM-L6-v2"
+      DATA_DIR: "/workspace/data"
+    volumes:
+      - ./data:/workspace/data:ro
     depends_on:
       - qdrant
     entrypoint: ["python", "ingest.py"]
 
+
   ui:
     build:
       context: ./ui
-    restart: unless-stopped
     env_file: .env
     environment:
       API_BASE: "http://api:8000"
