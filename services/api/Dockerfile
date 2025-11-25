@@ -18,3 +18,5 @@ ENV PYTHONPATH=/app
 
 # Run FastAPI with uvicorn, listening on all interfaces
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+
