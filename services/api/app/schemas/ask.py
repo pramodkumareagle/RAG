@@ -1,22 +1,17 @@
-from pydantic import BaseModel
+# app/schemas/ask.py
 from typing import List, Optional
+from pydantic import BaseModel
 
+class Citation(BaseModel):
+    doc_id: str
+    chunk: Optional[int]
+    score: float
+    text: str
 
 class AskRequest(BaseModel):
     query: str
-    top_k: int = 5
-
-
-class Hit(BaseModel):
-    score: float
-    text: str
-    filename: Optional[str]
-    source_path: Optional[str]
-    chunk: int
-    doc_id: Optional[str]
-
+    top_k: int = 6
 
 class AskResponse(BaseModel):
     answer: str
-    results: List[Hit]
-
+    citations: List[Citation] = []

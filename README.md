@@ -1,9 +1,8 @@
-
----
-
 ## 🧰 Prerequisites
 
 ### ✅ 1. Install Docker
+
+### Hugging Face/ Amazon Reckognition (For Refference)
 
 #### macOS / Windows:
 - Install **Docker Desktop** → [https://www.docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop)
@@ -24,10 +23,5 @@ sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 sudo apt update
 sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 sudo usermod -aG docker $USER
-
-
-
-
-
 
 docker compose up -d --build

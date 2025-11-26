@@ -7,6 +7,10 @@ WORKDIR /app
 COPY services/api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# inside services/api/Dockerfile
+RUN pip install fastapi uvicorn[standard] sqlalchemy psycopg2-binary \
+    pydantic mistralai qdrant-client sentence-transformers pandas openpyxl python-multipart
+
 # Copy shared core code
 COPY core /app/core
 

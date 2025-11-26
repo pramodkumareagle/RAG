@@ -1,25 +1,40 @@
 import os
-import requests
 import streamlit as st
 
+# Streamlit page config
+st.set_page_config(
+    page_title="Enterprise RAG UI",
+    page_icon="🤖",
+    layout="wide"
+)
+
+# Read API_BASE from environment
 API_BASE = os.getenv("API_BASE", "http://localhost:8000")
 
-st.set_page_config(page_title="Enterprise RAG", layout="wide")
-st.title("Enterprise RAG – Demo UI")
+# Main landing page
+st.title("🤖 Enterprise RAG – Demo UI")
+st.write("Welcome! Use the left sidebar to navigate:")
 
-query = st.text_input("Ask a question", "What does this system do?")
+st.markdown("""
+### 📤 Upload File
+Upload Excel/CSV/PDF/DOCX/TXT files.  
+The backend will parse tables and store them in PostgreSQL.
 
-if st.button("Ask"):
-    try:
-        resp = requests.post(f"{API_BASE}/v1/ask", json={"query": query})
-        if resp.ok:
-            data = resp.json()
-            st.subheader("Answer")
-            st.write(data.get("answer", "No answer"))
-            st.subheader("Citations")
-            for c in data.get("citations", []):
-                st.write(f"doc:{c['doc_id']}#{c['chunk']} (score {c['score']:.3f})")
-        else:
-            st.error(f"API error: {resp.text}")
-    except Exception as e:
-        st.error(str(e))
+### 💬 Chat with Data
+Ask structured questions (counts, lists, filters) or natural questions.  
+The backend will use **SQL for structured questions** and **RAG for text-based questions**.
+""")
+
+# Show API status
+st.subheader("API Status")
+
+import requests
+
+try:
+    resp = requests.get(f"{API_BASE}/health")
+    if resp.ok:
+        st.success("Backend API is reachable 🎉")
+    else:
+        st.error(f"API responded with status: {resp.status_code}")
+except Exception as e:
+    st.error(f"Cannot reach API: {e}")

@@ -1,39 +1,31 @@
+# app/main.py
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
 
-from app.routers import ask_router
-from core.storage.postgres_client import init_basic_schema
+from app.routers import ask_router, upload, files
+from core.storage.postgres_client import init_basic_schema, init_table_schema
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Modern FastAPI startup/shutdown handling.
-    Runs once when the app starts and once when it stops.
+    Initialize schemas on startup and log shutdown.
     """
-
-    # ---- STARTUP ----
     try:
         init_basic_schema()
+        init_table_schema()
         print("✅ Postgres tables initialized successfully.")
     except Exception as e:
         print("⚠️ [WARN] Failed to initialize Postgres schema:", e)
 
-    yield  # <-- Application runs while yielded
+    yield
 
-    # ---- SHUTDOWN ----
     print("🛑 API shutting down...")
 
 
-app = FastAPI(
-    title="Enterprise RAG API",
-    version="1.0.0",
-    lifespan=lifespan,
-)
+app = FastAPI(title="Enterprise RAG API", version="1.0.0", lifespan=lifespan)
 
-
-# CORS middleware — required for Streamlit UI
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -42,14 +34,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(upload.router)
+app.include_router(ask_router.router)
+app.include_router(files.router)
+
 
 @app.get("/health")
-def health_check():
-    """
-    Basic endpoint to check if the API is alive.
-    """
+def health():
     return {"status": "ok"}
 
 
-# ---- Register Routers ----
-app.include_router(ask_router.router)
+@app.on_event("startup")
+def startup():
+    init_basic_schema()
+    init_table_schema()
+    print("✅ Postgres tables initialized successfully.")
+
+

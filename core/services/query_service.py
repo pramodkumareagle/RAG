@@ -1,46 +1,158 @@
+# core/services/query_service.py
+
 import json
-from typing import List, Dict, Any, Optional
+import os
+from typing import Dict, Any, Optional, List
 
-from core.retrievers.semantic_retriever import semantic_search
-from core.storage.postgres_client import execute as pg_execute
-from core.llm.hf_client import generate_llm_answer
-from core.llm.llm_client import generate_answer
+from mistralai import Mistral
+
+from core.storage.postgres_client import execute
+from app import rag  # your existing rag search
+from app.schemas.ask import AskResponse, Citation
 
 
-def log_query(user_id: Optional[str], query: str, results: List[Dict[str, Any]]):
-    try:
-        top_docs = [
-            {
-                "filename": r.get("source"),
-                "score": r.get("score"),
-                "doc_id": r.get("id"),
-            }
-            for r in results
+MISTRAL_KEY = os.getenv("MISTRAL_API_KEY")
+MISTRAL_MODEL = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
+
+client = Mistral(api_key=MISTRAL_KEY)
+
+
+# --------------------------
+# 1. Identify SQL questions
+# --------------------------
+def is_sql_question(q: str) -> bool:
+    q = q.lower()
+    return any(
+        kw in q
+        for kw in [
+            "how many",
+            "number of",
+            "count",
+            "list",
+            "show",
+            "find all",
+            "give me all",
         ]
+    )
 
-        pg_execute(
-            """
-            INSERT INTO queries (user_id, query, top_docs)
-            VALUES (%s, %s, %s)
-            """,
-            (user_id, query, json.dumps(top_docs)),
+
+SQL_PROMPT = """
+You are a SQL generator for PostgreSQL.
+
+There are two tables:
+
+uploaded_files(id UUID, filename TEXT)
+extracted_rows(id SERIAL, file_id UUID, table_name TEXT, row_data JSONB)
+
+All actual columns live inside row_data:
+Example: row_data->>'Department', row_data->>'Year', row_data->>'Name'
+
+RULES:
+- If user asks "how many" → use COUNT(*)
+- For listing → SELECT row_data
+- Use ILIKE for matching text
+- Always output valid JSON only:
+{ "sql": "SELECT ...;" }
+"""
+
+
+def generate_sql(question: str) -> Optional[str]:
+    if not is_sql_question(question):
+        return None
+
+    messages = [
+        {"role": "system", "content": SQL_PROMPT},
+        {"role": "user", "content": question},
+    ]
+
+    resp = client.chat.complete(
+        model=MISTRAL_MODEL,
+        messages=messages,
+        temperature=0,
+    )
+
+    content = resp.choices[0].message.content.strip()
+
+    try:
+        obj = json.loads(content)
+        return obj.get("sql")
+    except:
+        return None
+
+
+# --------------------------
+# 2. Execute SQL
+# --------------------------
+def answer_with_sql(question: str) -> Optional[AskResponse]:
+    sql = generate_sql(question)
+    if sql is None:
+        return None
+
+    rows = execute(sql)
+
+    # COUNT(*)
+    if len(rows) == 1 and len(rows[0]) == 1:
+        val = list(rows[0].values())[0]
+        return AskResponse(answer=f"The result is: {val}", citations=[])
+
+    # list rows
+    lines = []
+    for r in rows[:10]:
+        lines.append(str(r))
+
+    txt = "\n".join(lines)
+    return AskResponse(answer=f"Here are some results:\n{txt}", citations=[])
+
+
+# --------------------------
+# 3. Fallback to RAG
+# --------------------------
+def answer_with_rag(question: str, top_k: int) -> AskResponse:
+    hits = rag.search(question, top_k)
+
+    context = []
+    for h in hits:
+        context.append(f"[doc:{h['doc_id']}] {h['text']}")
+    context_str = "\n".join(context)
+
+    rag_prompt = f"""
+Answer using ONLY this context. If insufficient, say "I don't know."
+
+Question: {question}
+Context:
+{context_str}
+"""
+
+    resp = client.chat.complete(
+        model=MISTRAL_MODEL,
+        messages=[
+            {"role": "user", "content": rag_prompt}
+        ],
+        temperature=0.1,
+    )
+
+    ans = resp.choices[0].message.content.strip()
+
+    citations = [
+        Citation(
+            doc_id=str(h["doc_id"]),
+            chunk=h["chunk_id"],
+            score=h["score"],
+            text=h["text"],
         )
-    except Exception as e:
-        print("[WARN] Failed to log query:", e)
+        for h in hits
+    ]
+
+    return AskResponse(answer=ans, citations=citations)
 
 
-def answer_query(query: str, top_k: int = 5, user_id: Optional[str] = None):
+# --------------------------
+# 4. Public entry for ask.py
+# --------------------------
+def answer_query(query: str, top_k: int, user_id=None) -> Dict[str, Any]:
+    sql_answer = answer_with_sql(query)
+    if sql_answer:
+        return sql_answer.dict()
 
-    # Semantic search
-    results = semantic_search(query, top_k=top_k)
-    if results is None:
-        results = []
-
-    # Generate final answer
-    answer_text = generate_answer(query, results)
-
-    # Always return valid structure
-    return {
-        "answer": answer_text,
-        "results": results
-    }
+    rag_answer = answer_with_rag(query, top_k)
+    return rag_answer.dict()
