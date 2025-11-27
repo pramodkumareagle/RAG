@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import altair as alt
 
-API_BASE = st.secrets.get("API_BASE", os.getenv("API_BASE", "http://api:8000"))
+API_BASE = st.secrets.get("API_BASE", os.getenv("API_BASE", "http://127.0.0.1:8000"))
 
 st.set_page_config(page_title="Advanced Dataset Browser", layout="wide")
 
