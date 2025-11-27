@@ -1,7 +1,8 @@
+# core/storage/postgres_client.py
+
 import os
 from functools import lru_cache
-from typing import Optional, Any, List
-
+from typing import Optional, List, Any
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from fastapi.encoders import jsonable_encoder
@@ -12,31 +13,27 @@ PG_DSN = os.getenv("PG_DSN")
 @lru_cache(maxsize=1)
 def get_pg_conn():
     if not PG_DSN:
-        raise RuntimeError("PG_DSN environment variable not set")
+        raise RuntimeError("PG_DSN not set")
     conn = psycopg2.connect(PG_DSN)
     conn.autocommit = True
     return conn
 
 
 def execute(query: str, params: Optional[tuple] = None) -> List[Any]:
-    """Execute SQL and return JSON-serializable results."""
     conn = get_pg_conn()
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(query, params or ())
         try:
             rows = cur.fetchall()
-            return jsonable_encoder(rows)   # ⭐ Fix JSON issues here
+            # ⭐ automatically make DB datetimes JSON-serializable
+            return jsonable_encoder(rows)
         except psycopg2.ProgrammingError:
             return []
 
 
-# ---------------------------------------------------------
-# CREATE REQUIRED SCHEMA ON STARTUP
-# ---------------------------------------------------------
 def init_basic_schema():
     """
-    Original schema initializer from your old version.
-    We keep it to maintain compatibility with services.
+    Original your 2 tables: ingested_documents & queries
     """
     execute("""
         CREATE TABLE IF NOT EXISTS ingested_documents (
@@ -64,7 +61,7 @@ def init_basic_schema():
 
 def init_table_schema():
     """
-    NEW tables needed for Upload/File Browser
+    New tables used for generic file ingest & SQL chat.
     """
     execute("""
         CREATE TABLE IF NOT EXISTS uploaded_files (

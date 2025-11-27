@@ -7,8 +7,8 @@ from typing import Dict, Any, Optional, List
 from mistralai import Mistral
 
 from core.storage.postgres_client import execute
-from app import rag  # your existing rag search
-from app.schemas.ask import AskResponse, Citation
+from services.api.app import rag  # your existing rag search
+from services.api.app.schemas.ask import AskResponse, Citation
 
 
 MISTRAL_KEY = os.getenv("MISTRAL_API_KEY")
