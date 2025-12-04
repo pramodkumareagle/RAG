@@ -1,26 +1,28 @@
-# core/utils/json_cleaner.py
-
 import pandas as pd
-import datetime
+import numpy as np
+from datetime import datetime, date
 
 def clean_for_json(obj):
-    """
-    Recursively convert Pandas Timestamp, numpy values,
-    and datetimes into JSON serializable types.
-    """
-    if isinstance(obj, pd.Timestamp):
-        return obj.to_pydatetime().isoformat()
-
-    if isinstance(obj, datetime.datetime):
-        return obj.isoformat()
-
-    if isinstance(obj, datetime.date):
-        return obj.isoformat()
-
     if isinstance(obj, list):
-        return [clean_for_json(i) for i in obj]
+        return [clean_for_json(o) for o in obj]
 
     if isinstance(obj, dict):
         return {k: clean_for_json(v) for k, v in obj.items()}
+
+    # Fix pandas Series explicitly
+    if isinstance(obj, pd.Series):
+        return obj.to_dict()
+
+    # Fix numpy data types
+    if isinstance(obj, (np.integer, np.int32, np.int64)):
+        return int(obj)
+    if isinstance(obj, (np.floating, np.float32, np.float64)):
+        return float(obj)
+    if isinstance(obj, (np.ndarray, list)):
+        return obj.tolist()
+
+    # Fix timestamps
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
 
     return obj

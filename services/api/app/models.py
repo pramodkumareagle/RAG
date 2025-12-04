@@ -16,6 +16,7 @@ class UploadedFile(Base):
     filename = Column(String, nullable=False)
     content_type = Column(String, nullable=False)
     storage_path = Column(String, nullable=False)
+    doc_type = Column(String, nullable=True)   # ⭐ ADD THIS
     created_at = Column(DateTime, default=datetime.utcnow)
 
     rows = relationship("ExtractedRow", back_populates="file", cascade="all, delete-orphan")

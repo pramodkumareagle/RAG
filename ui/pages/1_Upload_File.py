@@ -1,3 +1,5 @@
+# ui/pages/1_Upload_File.py
+
 import os
 import requests
 import streamlit as st
@@ -8,7 +10,7 @@ st.title("📤 Upload a File")
 
 uploaded_file = st.file_uploader(
     "Choose a file",
-    type=["xlsx", "xls", "csv", "pdf", "docx", "txt"]
+    type=["xlsx", "xls", "csv", "pdf", "docx", "txt"],
 )
 
 if uploaded_file:
@@ -23,7 +25,7 @@ if st.button("Upload"):
                 "file": (
                     uploaded_file.name,
                     uploaded_file.getvalue(),
-                    uploaded_file.type
+                    uploaded_file.type,
                 )
             }
 

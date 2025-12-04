@@ -1,3 +1,5 @@
+# services/api/app/routers/ask_router.py
+
 from fastapi import APIRouter, Depends
 
 from services.api.app.schemas.ask import AskRequest
@@ -8,11 +10,15 @@ router = APIRouter(prefix="/v1", tags=["ask"])
 
 
 def auth_user():
+    # simple stub – extend as needed
     return {"user_id": "demo-user"}
 
 
 @router.post("/ask")
 def ask_api(payload: AskRequest, user=Depends(auth_user)):
+    """
+    Ask a question against your vector index / DB.
+    """
     try:
         result = answer_query(
             query=payload.query,
