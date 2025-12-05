@@ -5,21 +5,21 @@ import os
 from typing import Dict, Any, Optional, List
 
 from mistralai import Mistral
-
 from core.storage.postgres_client import execute
-from services.api.app import rag  # your existing rag search
 from services.api.app.schemas.ask import AskResponse, Citation
 
-
+# -----------------------------
+# Mistral configuration
+# -----------------------------
 MISTRAL_KEY = os.getenv("MISTRAL_API_KEY")
 MISTRAL_MODEL = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
 
 client = Mistral(api_key=MISTRAL_KEY)
 
 
-# --------------------------
+# -----------------------------
 # 1. Identify SQL questions
-# --------------------------
+# -----------------------------
 def is_sql_question(q: str) -> bool:
     q = q.lower()
     return any(
@@ -39,18 +39,17 @@ def is_sql_question(q: str) -> bool:
 SQL_PROMPT = """
 You are a SQL generator for PostgreSQL.
 
-There are two tables:
-
+Tables:
 uploaded_files(id UUID, filename TEXT)
 extracted_rows(id SERIAL, file_id UUID, table_name TEXT, row_data JSONB)
 
-All actual columns live inside row_data:
-Example: row_data->>'Department', row_data->>'Year', row_data->>'Name'
+All real columns live inside row_data:
+Example: row_data->>'Department'
 
 RULES:
-- If user asks "how many" → use COUNT(*)
-- For listing → SELECT row_data
-- Use ILIKE for matching text
+- Use COUNT(*) for "how many"
+- Use SELECT row_data for listings
+- Use ILIKE for text filtering
 - Always output valid JSON only:
 { "sql": "SELECT ...;" }
 """
@@ -71,18 +70,19 @@ def generate_sql(question: str) -> Optional[str]:
         temperature=0,
     )
 
+    # NEW MISTRAL SDK RETURNS .content
     content = resp.choices[0].message.content.strip()
 
     try:
         obj = json.loads(content)
         return obj.get("sql")
-    except:
+    except Exception:
         return None
 
 
-# --------------------------
+# -----------------------------
 # 2. Execute SQL
-# --------------------------
+# -----------------------------
 def answer_with_sql(question: str) -> Optional[AskResponse]:
     sql = generate_sql(question)
     if sql is None:
@@ -90,69 +90,68 @@ def answer_with_sql(question: str) -> Optional[AskResponse]:
 
     rows = execute(sql)
 
-    # COUNT(*)
+    # COUNT(*) case
     if len(rows) == 1 and len(rows[0]) == 1:
-        val = list(rows[0].values())[0]
-        return AskResponse(answer=f"The result is: {val}", citations=[])
+        value = list(rows[0].values())[0]
+        return AskResponse(answer=f"The result is: {value}", citations=[])
 
     # list rows
-    lines = []
-    for r in rows[:10]:
-        lines.append(str(r))
-
-    txt = "\n".join(lines)
-    return AskResponse(answer=f"Here are some results:\n{txt}", citations=[])
+    lines = [str(r) for r in rows[:10]]
+    return AskResponse(answer="\n".join(lines), citations=[])
 
 
-# --------------------------
-# 3. Fallback to RAG
-# --------------------------
+# -----------------------------
+# 3. Postgres RAG (no Qdrant)
+# -----------------------------
 def answer_with_rag(question: str, top_k: int) -> AskResponse:
-    hits = rag.search(question, top_k)
+    db_rows = execute(
+        """
+        SELECT text
+        FROM extracted_text
+        ORDER BY created_at DESC
+        LIMIT %s;
+        """,
+        (top_k,),
+    )
 
-    context = []
-    for h in hits:
-        context.append(f"[doc:{h['doc_id']}] {h['text']}")
-    context_str = "\n".join(context)
+    docs = [r["text"] for r in db_rows if r["text"]]
 
-    rag_prompt = f"""
-Answer using ONLY this context. If insufficient, say "I don't know."
+    context_block = "\n\n".join(docs) if docs else "No documents found."
+
+    prompt = f"""
+Answer the question using ONLY the context below. 
+If you cannot answer from the context, reply: "I don't know."
 
 Question: {question}
+
 Context:
-{context_str}
+{context_block}
 """
 
     resp = client.chat.complete(
         model=MISTRAL_MODEL,
-        messages=[
-            {"role": "user", "content": rag_prompt}
-        ],
-        temperature=0.1,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
     )
 
-    ans = resp.choices[0].message.content.strip()
+    # FIXED: USE .content
+    answer = resp.choices[0].message.content.strip()
 
     citations = [
-        Citation(
-            doc_id=str(h["doc_id"]),
-            chunk=h["chunk_id"],
-            score=h["score"],
-            text=h["text"],
-        )
-        for h in hits
+        Citation(doc_id=str(i), chunk=0, score=1.0, text=text)
+        for i, text in enumerate(docs)
     ]
 
-    return AskResponse(answer=ans, citations=citations)
+    return AskResponse(answer=answer, citations=citations)
 
 
-# --------------------------
-# 4. Public entry for ask.py
-# --------------------------
-def answer_query(query: str, top_k: int, user_id=None) -> Dict[str, Any]:
-    sql_answer = answer_with_sql(query)
-    if sql_answer:
-        return sql_answer.dict()
+# -----------------------------
+# 4. Entry point
+# -----------------------------
+def answer_query(query: str, top_k: int = 5, user_id=None) -> Dict[str, Any]:
+    sql_result = answer_with_sql(query)
+    if sql_result:
+        return sql_result.dict()
 
-    rag_answer = answer_with_rag(query, top_k)
-    return rag_answer.dict()
+    rag_result = answer_with_rag(query, top_k)
+    return rag_result.dict()
