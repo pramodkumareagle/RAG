@@ -5,15 +5,13 @@ from core.services.mistral_ocr import extract_text_via_mistral_ocr
 
 
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
-    """
-    Try normal PDF text extraction first (pdfplumber).
-    If empty → return "" and let Mistral OCR handle it.
-    """
     try:
-        with pdfplumber.open(pdf_bytes) as pdf:
+        from io import BytesIO
+        with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
             pages = [page.extract_text() or "" for page in pdf.pages]
             return "\n".join(pages)
-    except:
+    except Exception as e:
+        print("PDF text extract error:", e)
         return ""
 
 
