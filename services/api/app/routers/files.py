@@ -1,100 +1,115 @@
-# services/api/app/routers/files.py
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+import os
 
-from fastapi import APIRouter, HTTPException
-from core.storage.postgres_client import execute
+from services.api.app.db import get_db
+from services.api.app.models import UploadedFile, ExtractedRow, ExtractedText
 from core.utils.response import json_ok, json_error
-from core.utils.json_cleaner import clean_for_json
-import fitz  # PyMuPDF
 
 router = APIRouter(prefix="/v1/files", tags=["files"])
 
 
 # ---------------------------------------------------------
-# List uploaded files
+# GET ALL UPLOADED FILES
 # ---------------------------------------------------------
 @router.get("")
-def list_files():
+def list_files(db: Session = Depends(get_db)):
     try:
-        rows = execute(
-            """
-            SELECT id, filename, content_type, storage_path, created_at, doc_type
-            FROM uploaded_files
-            ORDER BY created_at DESC
-            """
-        )
-        return json_ok(clean_for_json(rows))
+        files = db.query(UploadedFile).order_by(UploadedFile.created_at.desc()).all()
+        result = [
+            {
+                "id": str(f.id),
+                "filename": f.filename,
+                "doc_type": f.doc_type,
+                "content_type": f.content_type,
+                "storage_path": f.storage_path,
+                "created_at": f.created_at.isoformat(),
+            }
+            for f in files
+        ]
+        return json_ok(result)
     except Exception as e:
-        return json_error(str(e), status_code=500)
+        return json_error(str(e))
 
 
 # ---------------------------------------------------------
-# Get extracted table rows
+# GET TABLE ROWS FOR A FILE
 # ---------------------------------------------------------
 @router.get("/{file_id}/rows")
-def file_rows(file_id: str):
+def file_rows(file_id: str, db: Session = Depends(get_db)):
     try:
-        rows = execute(
-            """
-            SELECT id, table_name, row_data, created_at
-            FROM extracted_rows
-            WHERE file_id = %s
-            ORDER BY id ASC
-            """,
-            (file_id,)
+        rows = (
+            db.query(ExtractedRow)
+            .filter(ExtractedRow.file_id == file_id)
+            .order_by(ExtractedRow.id.asc())
+            .all()
         )
-        return json_ok(clean_for_json(rows))
+
+        result = [
+            {
+                "id": r.id,
+                "table_name": r.table_name,
+                "row_data": r.row_data,
+                "created_at": r.created_at.isoformat(),
+            }
+            for r in rows
+        ]
+        return json_ok(result)
+
     except Exception as e:
-        return json_error(str(e), status_code=500)
+        return json_error(str(e))
 
 
 # ---------------------------------------------------------
-# DELETE file
-# ---------------------------------------------------------
-@router.delete("/{file_id}")
-def delete_file(file_id: str):
-    try:
-        execute("DELETE FROM uploaded_files WHERE id = %s", (file_id,))
-        return json_ok({"deleted": file_id})
-    except Exception as e:
-        return json_error(str(e), status_code=500)
-
-
-# ---------------------------------------------------------
-# NEW: Extract raw text from PDF
+# GET EXTRACTED TEXT
 # ---------------------------------------------------------
 @router.get("/{file_id}/text")
-def extract_text(file_id: str):
+def get_file_text(file_id: str, db: Session = Depends(get_db)):
     """
-    Extract full text from a PDF file.
+    Returns extracted text for ANY document type.
+    We always read from extracted_text table.
     """
     try:
-        # Fetch file info
-        rows = execute(
-            """
-            SELECT storage_path, content_type 
-            FROM uploaded_files
-            WHERE id = %s
-            """,
-            (file_id,)
+        text_record = (
+            db.query(ExtractedText)
+            .filter(ExtractedText.file_id == file_id)
+            .order_by(ExtractedText.id.asc())
+            .first()
         )
 
-        if not rows:
-            raise HTTPException(status_code=404, detail="File not found")
+        if not text_record:
+            return json_ok({"text": ""})  # no text extracted
 
-        file = rows[0]
-        file_path = file["storage_path"]
-        content_type = file["content_type"]
-
-        if content_type != "application/pdf":
-            raise HTTPException(status_code=400, detail="Only PDF text extraction is supported")
-
-        # Extract text
-        text = ""
-        with fitz.open(file_path) as pdf:
-            for page in pdf:
-                text += page.get_text()
-
-        return json_ok({"text": text})
+        return json_ok({"text": text_record.text})
 
     except Exception as e:
-        return json_error(str(e), status_code=500)
+        return json_error(str(e))
+
+
+# ---------------------------------------------------------
+# DELETE FILE (DB + DISK)
+# ---------------------------------------------------------
+@router.delete("/{file_id}")
+def delete_file(file_id: str, db: Session = Depends(get_db)):
+    try:
+        file_obj = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
+
+        if not file_obj:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        # Delete physical file
+        try:
+            if os.path.exists(file_obj.storage_path):
+                os.remove(file_obj.storage_path)
+        except Exception as e:
+            print("File delete error:", e)
+
+        # Delete DB row (ExtractedRow, ExtractedText cascade automatically)
+        db.delete(file_obj)
+        db.commit()
+
+        return json_ok({"deleted": file_id})
+
+    except Exception as e:
+        db.rollback()
+        return json_error(str(e))

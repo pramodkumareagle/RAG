@@ -24,7 +24,95 @@ if not files:
     st.stop()
 
 # ---------------------------------------------------------
-# Show uploaded files
+# Sidebar Modern Card UI
+# ---------------------------------------------------------
+
+# Add CSS for sidebar cards
+st.sidebar.markdown("""
+<style>
+.sidebar-card {
+    padding: 10px;
+    border-radius: 10px;
+    background-color: #f8f9fa;
+    margin-bottom: 12px;
+    border: 1px solid #e5e7eb;
+    transition: all 0.2s ease-in-out;
+}
+.sidebar-card:hover {
+    background-color: #eef2ff;
+    transform: translateX(4px);
+}
+.sidebar-title {
+    font-size: 0.90rem;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+.sidebar-meta {
+    font-size: 0.75rem;
+    color: #6b7280;
+    margin-bottom: 8px;
+}
+.open-btn {
+    background-color: #2563eb;
+    color: white;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: none;
+    font-size: 0.75rem;
+}
+.delete-btn {
+    background-color: #ef4444;
+    color: white;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: none;
+    font-size: 0.75rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Maintain selected file
+if "selected_file_id" not in st.session_state:
+    st.session_state["selected_file_id"] = files[0]["id"]  # auto-select first file
+
+# Render each file as a sidebar "card"
+for f in files:
+    with st.sidebar.container():
+        st.markdown(f"""
+        <div class="sidebar-card">
+            <div class="sidebar-title">📄 {f['filename']}</div>
+            <div class="sidebar-meta">Type: {f['doc_type']}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        c1, c2 = st.sidebar.columns([1, 1])
+
+        # Open button
+        if c1.button("Open", key=f"open_{f['id']}"):
+            st.session_state["selected_file_id"] = f["id"]
+            st.rerun()
+
+        # Delete button
+        if c2.button("Delete", key=f"delete_{f['id']}"):
+            try:
+                del_resp = requests.delete(f"{API_BASE}/v1/files/{f['id']}")
+                if del_resp.status_code == 200:
+                    st.sidebar.success("File deleted")
+                    st.rerun()
+                else:
+                    st.sidebar.error("Delete failed")
+            except Exception as e:
+                st.sidebar.error(f"Error: {e}")
+
+    st.sidebar.markdown("---")
+
+# Active file
+file_id = st.session_state["selected_file_id"]
+selected_file = next((f for f in files if f["id"] == file_id), None)
+selected_label = selected_file["filename"] if selected_file else "Selected File"
+
+# ---------------------------------------------------------
+# Uploaded document metadata
 # ---------------------------------------------------------
 st.subheader("📄 Uploaded Documents")
 
@@ -32,32 +120,9 @@ try:
     file_df = pd.DataFrame(files)
     cols = ["id", "filename", "doc_type", "content_type", "created_at"]
     cols = [c for c in cols if c in file_df.columns]
-
     st.dataframe(file_df[cols], use_container_width=True)
 except:
     st.warning("Unable to display file metadata.")
-
-# ---------------------------------------------------------
-# Sidebar selection
-# ---------------------------------------------------------
-file_map = {f"{f['filename']} ({f['id']})": f["id"] for f in files}
-selected_label = st.sidebar.selectbox("Choose a file to explore", list(file_map.keys()))
-file_id = file_map[selected_label]
-
-# ---------------------------------------------------------
-# Delete file
-# ---------------------------------------------------------
-st.sidebar.markdown("---")
-if st.sidebar.button("🗑 Delete This File"):
-    try:
-        resp = requests.delete(f"{API_BASE}/v1/files/{file_id}")
-        if resp.status_code == 200:
-            st.sidebar.success("File deleted.")
-            st.rerun()
-        else:
-            st.sidebar.error("Failed to delete file.")
-    except Exception as e:
-        st.sidebar.error(f"Deletion failed: {e}")
 
 # ---------------------------------------------------------
 # Load extracted rows
@@ -72,43 +137,31 @@ except Exception as e:
     st.stop()
 
 # ---------------------------------------------------------
-# CASE 1 — NO TABLE ROWS → Show text + AI summary
+# CASE 1 — NO TABLE ROWS (TEXT DOCUMENT)
 # ---------------------------------------------------------
 if not rows:
     st.warning("This file does not contain any row data. Showing text & AI analysis options.")
 
-    # ---- Extract text from backend ----
     st.subheader("📘 Extracted Text (Preview)")
 
     try:
         text_resp = requests.get(f"{API_BASE}/v1/files/{file_id}/text").json()
         raw_text = text_resp.get("data", {}).get("text", "")
     except:
-        st.error("Could not extract text from this PDF.")
+        st.error("Could not extract text from this document.")
         st.stop()
 
     if not raw_text:
         st.error("No readable text found in this document.")
         st.stop()
 
-    # ---------------------------------------------------------
-    # CLEAN, GENERIC PREVIEW (NO RESUME LOGIC)
-    # ---------------------------------------------------------
+    # Clean simple formatting for preview
     clean_text = raw_text.strip()
-
-    # Fix bullets
-    clean_text = clean_text.replace("•", "\n- ")
-    clean_text = clean_text.replace("●", "\n- ")
-    clean_text = clean_text.replace("▪", "\n- ")
-
-    # Add paragraph breaks
+    clean_text = clean_text.replace("•", "\n- ").replace("●", "\n- ").replace("▪", "\n- ")
     clean_text = clean_text.replace(". ", ".\n")
-
-    # Remove triple newlines
     while "\n\n\n" in clean_text:
         clean_text = clean_text.replace("\n\n\n", "\n\n")
 
-    # Render in a scrollable box
     st.markdown(
         f"""
         <div style="
@@ -127,9 +180,7 @@ if not rows:
         unsafe_allow_html=True
     )
 
-    # ---------------------------------------------------------
-    # AI Summary Button
-    # ---------------------------------------------------------
+    # Ask AI for summary
     st.subheader("🤖 AI Summary & Insights")
 
     if st.button("✨ Generate AI Summary"):
@@ -139,21 +190,30 @@ if not rows:
                 json={"text": raw_text}
             ).json()
 
+            summary = ai_resp.get("data", None)
+
+            # Backend may return a string or a structured dict
+            if isinstance(summary, dict):
+                summary = summary.get("summary", "No response")
+
+            if not summary:
+                summary = "No response"
+
             st.markdown("## 🧠 AI Summary")
-            st.write(ai_resp.get("data", "No response"))
+            st.write(summary)
+
         except Exception as e:
             st.error(f"AI Summary Failed: {e}")
 
-    st.stop()  # IMPORTANT — do NOT continue to table logic
 
 # ---------------------------------------------------------
-# CASE 2 — TABLE ROWS EXIST
+# CASE 2 — TABLE ROWS
 # ---------------------------------------------------------
 df = pd.DataFrame(rows)
 st.dataframe(df, use_container_width=True)
 
 # ---------------------------------------------------------
-# Summary statistics
+# Summary stats
 # ---------------------------------------------------------
 st.header("📈 Summary Statistics")
 
@@ -221,7 +281,7 @@ if plots:
         st.plotly_chart(fig, use_container_width=True)
 
 # ---------------------------------------------------------
-# AI Q&A (for tables)
+# AI Table Q&A
 # ---------------------------------------------------------
 st.header("🤖 AI Insights (Table Data)")
 

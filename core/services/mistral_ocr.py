@@ -44,3 +44,4 @@ def extract_text_via_mistral_ocr(pdf_bytes: bytes) -> str:
     except Exception as e:
         print("Mistral OCR error:", e)
         return ""
+

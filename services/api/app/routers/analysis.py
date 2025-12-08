@@ -162,12 +162,7 @@ async def llm_summary(payload: dict):
                 "role": "user",
                 "content": (
                     "Summarize this document.\n\n"
-                    "Return:\n"
-                    "- Executive summary\n"
-                    "- Bullet points\n"
-                    "- Entities\n"
-                    "- Key insights\n"
-                    "- Recommendations\n\n"
+                    "Return a clean structured summary.\n\n"
                     f"Document:\n{text}"
                 ),
             },
@@ -180,7 +175,14 @@ async def llm_summary(payload: dict):
         res.raise_for_status()
 
         answer = res.json()["choices"][0]["message"]["content"]
-        return {"success": True, "data": answer}
+
+        return {
+            "success": True,
+            "data": {
+                "summary": answer
+            }
+        }
 
     except Exception as e:
         raise HTTPException(500, f"Mistral API error: {e}")
+
