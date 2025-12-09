@@ -73,9 +73,9 @@ st.sidebar.markdown("""
 
 # Maintain selected file
 if "selected_file_id" not in st.session_state:
-    st.session_state["selected_file_id"] = files[0]["id"]  # auto-select first file
+    st.session_state["selected_file_id"] = files[0]["id"]
 
-# Render each file as a sidebar "card"
+# Sidebar file cards
 for f in files:
     with st.sidebar.container():
         st.markdown(f"""
@@ -87,12 +87,10 @@ for f in files:
 
         c1, c2 = st.sidebar.columns([1, 1])
 
-        # Open button
         if c1.button("Open", key=f"open_{f['id']}"):
             st.session_state["selected_file_id"] = f["id"]
             st.rerun()
 
-        # Delete button
         if c2.button("Delete", key=f"delete_{f['id']}"):
             try:
                 del_resp = requests.delete(f"{API_BASE}/v1/files/{f['id']}")
@@ -106,7 +104,6 @@ for f in files:
 
     st.sidebar.markdown("---")
 
-# Active file
 file_id = st.session_state["selected_file_id"]
 selected_file = next((f for f in files if f["id"] == file_id), None)
 selected_label = selected_file["filename"] if selected_file else "Selected File"
@@ -148,19 +145,15 @@ if not rows:
         text_resp = requests.get(f"{API_BASE}/v1/files/{file_id}/text").json()
         raw_text = text_resp.get("data", {}).get("text", "")
     except:
-        st.error("Could not extract text from this document.")
+        st.error("Could not extract text.")
         st.stop()
 
     if not raw_text:
-        st.error("No readable text found in this document.")
+        st.error("No readable text found.")
         st.stop()
 
-    # Clean simple formatting for preview
-    clean_text = raw_text.strip()
-    clean_text = clean_text.replace("•", "\n- ").replace("●", "\n- ").replace("▪", "\n- ")
+    clean_text = raw_text.strip().replace("•", "\n- ").replace("●", "\n- ").replace("▪", "\n- ")
     clean_text = clean_text.replace(". ", ".\n")
-    while "\n\n\n" in clean_text:
-        clean_text = clean_text.replace("\n\n\n", "\n\n")
 
     st.markdown(
         f"""
@@ -180,7 +173,6 @@ if not rows:
         unsafe_allow_html=True
     )
 
-    # Ask AI for summary
     st.subheader("🤖 AI Summary & Insights")
 
     if st.button("✨ Generate AI Summary"):
@@ -192,19 +184,13 @@ if not rows:
 
             summary = ai_resp.get("data", None)
 
-            # Backend may return a string or a structured dict
             if isinstance(summary, dict):
                 summary = summary.get("summary", "No response")
 
-            if not summary:
-                summary = "No response"
-
             st.markdown("## 🧠 AI Summary")
-            st.write(summary)
-
+            st.write(summary or "No response")
         except Exception as e:
             st.error(f"AI Summary Failed: {e}")
-
 
 # ---------------------------------------------------------
 # CASE 2 — TABLE ROWS
@@ -226,38 +212,89 @@ try:
 except:
     st.warning("Could not load summary statistics.")
 
+
 # ---------------------------------------------------------
-# Filtering
+# 🎛 **Improved Filtering UI**
 # ---------------------------------------------------------
-st.header("🎛 Filter Data")
+st.header("🎛 Data Filters")
 
-numeric_cols = df.select_dtypes(include="number").columns.tolist()
-text_cols = df.select_dtypes(include="object").columns.tolist()
-all_cols = numeric_cols + text_cols
+with st.expander("🔍 Show Filters", expanded=True):
 
-selected_col = st.selectbox("Filter column", all_cols)
+    # Convert numeric-looking text to numbers
+    for col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors="ignore")
 
-if selected_col:
-    if selected_col in numeric_cols:
-        min_val, max_val = st.slider(
-            "Value range",
-            float(df[selected_col].min()),
-            float(df[selected_col].max()),
-            (float(df[selected_col].min()), float(df[selected_col].max()))
+    numeric_cols = df.select_dtypes(include="number").columns.tolist()
+    text_cols = df.select_dtypes(include="object").columns.tolist()
+    date_cols = df.select_dtypes(include=["datetime", "datetimetz"]).columns.tolist()
+    bool_cols = df.select_dtypes(include="bool").columns.tolist()
+
+    filter_col = st.selectbox("Select a column to filter", df.columns)
+
+    temp_df = df.copy()
+
+    if filter_col in numeric_cols:
+        col_min = temp_df[filter_col].min()
+        col_max = temp_df[filter_col].max()
+
+        if pd.isna(col_min) or pd.isna(col_max) or col_min == col_max:
+            st.warning(f"Column '{filter_col}' has no numeric range.")
+        else:
+            min_val, max_val = st.slider(
+                f"Range for {filter_col}",
+                float(col_min),
+                float(col_max),
+                (float(col_min), float(col_max))
+            )
+            temp_df = temp_df[(temp_df[filter_col] >= min_val) & (temp_df[filter_col] <= max_val)]
+
+    elif filter_col in text_cols:
+        unique_vals = temp_df[filter_col].dropna().unique()
+
+        if len(unique_vals) <= 25:
+            selected_vals = st.multiselect(
+                f"Select {filter_col}",
+                options=sorted(unique_vals),
+                default=sorted(unique_vals)
+            )
+            temp_df = temp_df[temp_df[filter_col].isin(selected_vals)]
+        else:
+            keyword = st.text_input(f"Search in {filter_col}")
+            case = st.checkbox("Case sensitive?", value=False)
+            if keyword:
+                temp_df = temp_df[temp_df[filter_col].astype(str).str.contains(keyword, case=case)]
+
+    elif filter_col in date_cols:
+        date_min = temp_df[filter_col].min()
+        date_max = temp_df[filter_col].max()
+
+        start_date, end_date = st.date_input(
+            f"Select date range for {filter_col}",
+            value=(date_min, date_max),
         )
-        filtered_df = df[(df[selected_col] >= min_val) & (df[selected_col] <= max_val)]
-    else:
-        keyword = st.text_input("Keyword contains")
-        filtered_df = df[df[selected_col].astype(str).str.contains(keyword, case=False)] if keyword else df
 
-    st.dataframe(filtered_df, use_container_width=True)
+        temp_df = temp_df[
+            (temp_df[filter_col] >= pd.to_datetime(start_date)) &
+            (temp_df[filter_col] <= pd.to_datetime(end_date))
+        ]
 
-    st.download_button(
-        "⬇ Download Filtered CSV",
-        data=filtered_df.to_csv(index=False).encode(),
-        file_name=f"{selected_col}_filtered.csv",
-        mime="text/csv"
-    )
+    elif filter_col in bool_cols:
+        choice = st.radio(f"Value for {filter_col}", [True, False, "All"])
+        if choice != "All":
+            temp_df = temp_df[temp_df[filter_col] == choice]
+
+    if st.button("🔄 Reset Filters"):
+        st.rerun()
+
+st.subheader("📄 Filtered Data")
+st.dataframe(temp_df, use_container_width=True)
+
+st.download_button(
+    "⬇ Download Filtered CSV",
+    data=temp_df.to_csv(index=False).encode(),
+    file_name="filtered_data.csv",
+    mime="text/csv"
+)
 
 # ---------------------------------------------------------
 # Visualizations

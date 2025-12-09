@@ -15,7 +15,7 @@ def generate_llm_answer(query: str, context: str) -> str:
             "model": LLM_MODEL,
             "input": f"Context:\n{context}\n\nQuestion: {query}\n\nAnswer:",
             "parameters": {
-                "max_new_tokens": 200,
+                "max_new_tokens": 10,
                 "temperature": 0.3,
             }
         }
