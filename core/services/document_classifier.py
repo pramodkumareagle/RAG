@@ -28,14 +28,18 @@ def classify_document(text: str) -> str:
             {
                 "role": "user",
                 "content": (
-                    "Classify the type of this document strictly into one of the following categories: \n"
-                    "resume, payslip, magzinee, invoice, receipt, contract, report, letter, bill, book, memo, other.\n\n"
-                    "Document content:\n" + text
+                    "You are an  expert document classifier. \n"
+                    "your task is to identify the type of document based on its content. \n"
+                    "Return ONLY the document type as 1-3 words. \n"
+                    "Examples: 'invoice', 'receipt', 'contract', 'report', 'letter', 'memo', 'email', 'form', 'manual', 'article'. \n\n"
                 ),
             },
         ],
         "temperature": 0.0
     }
+
+    import json
+    print("Mistral classify_document payload:", json.dumps(body, indent=2))
 
     try:
         res = requests.post(
