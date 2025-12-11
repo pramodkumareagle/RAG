@@ -9,12 +9,12 @@ MISTRAL_OCR_MODEL = os.getenv("MISTRAL_OCR_MODEL", "mistral-large-latest")
 
 def classify_document(text: str) -> str:
     """
-    Classify document type using Mistral LLM.
-    Returns a string label like 'invoice', 'receipt', 'contract', etc.
+    Ask Mistral to identify the REAL document type.
+    Ensures only a clean label is returned.
     """
 
     if len(text) > 4000:
-        text = text[:4000]  # truncate to fit token limits
+        text = text[:4000]
 
     headers = {
         "Authorization": f"Bearer {MISTRAL_API_KEY}",
@@ -24,22 +24,30 @@ def classify_document(text: str) -> str:
     body = {
         "model": MISTRAL_OCR_MODEL,
         "messages": [
-            {"role": "system", "content": "Return only one label."},
+            {
+                "role": "system",
+                "content": (
+                    "You are a strict document classifier.\n"
+                    "Return ONLY the document type.\n"
+                    "Return ONLY a SINGLE word or short phrase.\n"
+                    "Do NOT say 'the document is', do NOT explain, do NOT acknowledge.\n"
+                    "IF YOU UNDERSTAND, DO NOT SAY 'understood'. Just classify.\n"
+                )
+            },
             {
                 "role": "user",
                 "content": (
-                    "You are an  expert document classifier. \n"
-                    "your task is to identify the type of document based on its content. \n"
-                    "Return ONLY the document type as 1-3 words. \n"
-                    "Examples: 'invoice', 'receipt', 'contract', 'report', 'letter', 'memo', 'email', 'form', 'manual', 'article'. \n\n"
+                    "Classify the document type from the following content.\n"
+                    "Return ONLY the type. Examples: bank statement, payslip, resume, invoice, bill, contract.\n\n"
+                    f"Document content:\n{text}"
                 ),
             },
         ],
-        "temperature": 0.0
+        "temperature": 0.1
     }
 
     import json
-    print("Mistral classify_document payload:", json.dumps(body, indent=2))
+    print("🔍 classify_document payload:", json.dumps(body, indent=2))
 
     try:
         res = requests.post(
@@ -48,6 +56,27 @@ def classify_document(text: str) -> str:
             json=body
         )
         res.raise_for_status()
-        return res.json()["choices"][0]["message"]["content"].strip().lower()
+
+        raw = res.json()["choices"][0]["message"]["content"].strip()
+
+        print("🔎 Raw LLM Output:", raw)
+
+         
+        clean = raw.split("\n")[0].strip()  # only first line  
+        clean = clean.replace("Document type:", "").strip()
+        clean = clean.replace("Type:", "").strip()
+        clean = clean.replace("It's", "").strip()
+
+        # If model still returns junk like "Understood"  
+        bad_words = ["understood", "okay", "ok", "sure"]
+        if clean.lower() in bad_words:
+            clean = "unknown"
+
+        print("🏷️ Final Classified Label:", clean)
+        return clean.lower()
+
     except Exception as e:
+        print("❌ Error in classify_document:", str(e))
         return "unknown"
+
+
