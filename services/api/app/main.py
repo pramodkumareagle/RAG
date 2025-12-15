@@ -47,7 +47,7 @@ app.include_router(upload.router)
 app.include_router(ask_router.router)
 app.include_router(files.router)
 app.include_router(analysis.router)
-app.include_router(analysis.code_chat)
+app.include_router(code_chat.router)
 
 
 @app.get("/health")
