@@ -14,6 +14,8 @@ st.sidebar.header("📁 Uploaded Files")
 
 try:
     resp = requests.get(f"{API_BASE}/v1/files")
+    st.json(resp.json())
+    print("Response", resp.json())
     files = resp.json().get("data", [])
 except Exception as e:
     st.error(f"❌ Unable to load files: {e}")
@@ -128,6 +130,7 @@ st.subheader(f"📚 Records for: {selected_label}")
 
 try:
     rows_resp = requests.get(f"{API_BASE}/v1/files/{file_id}/rows").json()
+    
     rows = rows_resp.get("data", [])
 except Exception as e:
     st.error(f"❌ Unable to fetch rows: {e}")

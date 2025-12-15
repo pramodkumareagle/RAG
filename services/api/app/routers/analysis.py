@@ -140,6 +140,7 @@ async def histogram_plots(file_id: str):
 # ------------------------------------------------------
 @router.post("/v1/analysis/llm_summary")
 async def llm_summary(payload: dict):
+    print("LLM Summary Payload:", payload)
 
     text = payload.get("text", "")
 

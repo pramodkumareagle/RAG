@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # FIXED IMPORTS
-from services.api.app.routers import ask_router, upload, files, analysis
+from services.api.app.routers import ask_router, upload, files, analysis, code_chat
 from core.storage.postgres_client import init_basic_schema, init_table_schema
 
 
@@ -47,6 +47,7 @@ app.include_router(upload.router)
 app.include_router(ask_router.router)
 app.include_router(files.router)
 app.include_router(analysis.router)
+app.include_router(analysis.code_chat)
 
 
 @app.get("/health")
