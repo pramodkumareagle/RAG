@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 from mistralai import Mistral
-
+import os
 from core.github.realtime_search import (
     github_code_search,
     get_file_download_url,
@@ -10,7 +10,7 @@ from core.github.realtime_search import (
 )
 
 router = APIRouter()
-client = Mistral(api_key=None)  # uses env MISTRAL_API_KEY if set
+client = Mistral(api_key=os.getenv("MISTRAL_API_KEY"))
 
 SYSTEM_PROMPT = """
 You are a senior software engineer.
@@ -82,6 +82,6 @@ def code_chat(payload: CodeChatRequest):
     )
 
     return {
-        "answer": resp.choices[0].message["content"],
+        "answer": resp.choices[0].message.content,
         "sources": sources
     }
