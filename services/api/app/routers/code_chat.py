@@ -1,7 +1,13 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from mistralai import Mistral
 import os
+import uuid
+from datetime import datetime
+
+from core.storage.postgres_client import execute
+from services.api.app.auth.deps import get_current_user
+
 from core.github.realtime_search import (
     github_code_search,
     get_file_download_url,
@@ -22,20 +28,42 @@ If snippets are not enough, say what is missing.
 
 class CodeChatRequest(BaseModel):
     question: str
+    session_id: str | None = None  # ✅ optional, UI can pass it for persistent sessions
 
 
 @router.post("/v1/code-snippet-chat")
-def code_chat(payload: CodeChatRequest):
+def code_chat(payload: CodeChatRequest, user=Depends(get_current_user)):
     question = payload.question.strip()
+    if not question:
+        return {"answer": "Question is required.", "sources": []}
+
+    user_id = str(user["id"])
+    session_id = payload.session_id or f"codechat-{user_id}-{datetime.utcnow().date().isoformat()}"
+
+    # ✅ log user message (optional)
+    execute(
+        """
+        INSERT INTO code_chat_history (session_id, role, content, source, created_at)
+        VALUES (%s, 'user', %s, %s, now())
+        """,
+        (session_id, question, None)
+    )
 
     # Build GitHub search query (public)
-    # You can tune this: add language filters etc.
     gh_query = f"{question} language:python"
-
     items = github_code_search(gh_query, per_page=5)
 
     if not items:
-        return {"answer": "No relevant code found on GitHub search for this query.", "sources": []}
+        answer = "No relevant code found on GitHub search for this query."
+        # ✅ log assistant message
+        execute(
+            """
+            INSERT INTO code_chat_history (session_id, role, content, source, created_at)
+            VALUES (%s, 'assistant', %s, %s, now())
+            """,
+            (session_id, answer, "[]")
+        )
+        return {"answer": answer, "sources": []}
 
     sources = []
     context_blocks = []
@@ -69,7 +97,17 @@ def code_chat(payload: CodeChatRequest):
         )
 
     if not context_blocks:
-        return {"answer": "GitHub search found matches, but I couldn't fetch the raw files.", "sources": sources}
+        answer = "GitHub search found matches, but I couldn't fetch the raw files."
+
+        execute(
+            """
+            INSERT INTO code_chat_history (session_id, role, content, source, created_at)
+            VALUES (%s, 'assistant', %s, %s, now())
+            """,
+            (session_id, answer, str(sources))
+        )
+
+        return {"answer": answer, "sources": sources}
 
     prompt = f"Question: {question}\n\nGitHub snippets:\n\n" + "\n\n---\n\n".join(context_blocks)
 
@@ -81,7 +119,18 @@ def code_chat(payload: CodeChatRequest):
         ],
     )
 
+    answer = resp.choices[0].message.content
+
+    # ✅ log assistant message (sources stored as JSON-ish string)
+    execute(
+        """
+        INSERT INTO code_chat_history (session_id, role, content, source, created_at)
+        VALUES (%s, 'assistant', %s, %s, now())
+        """,
+        (session_id, answer, str(sources))
+    )
+
     return {
-        "answer": resp.choices[0].message.content,
+        "answer": answer,
         "sources": sources
     }

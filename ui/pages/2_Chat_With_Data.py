@@ -1,62 +1,78 @@
-import os
-import requests
 import streamlit as st
+import requests
+from auth_api import require_auth, auth_headers, logout
 
-API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8000")
+API_BASE = "http://localhost:8000"
 
-st.title("💬 Chat With Your Data")
+require_auth()
+st.title("💬 Chat With Data")
 
-# ---------------------------------------------------------
-# Load uploaded files
-# ---------------------------------------------------------
-try:
-    resp = requests.get(f"{API_BASE}/v1/files")
-    files = resp.json().get("data", [])
-except Exception as e:
-    st.error(f"Unable to load files: {e}")
-    st.stop()
+# ------------------------------------
+# SIDEBAR
+# ------------------------------------
+with st.sidebar:
+    st.subheader("🧠 Chats")
 
-if not files:
-    st.warning("No uploaded files found.")
-    st.stop()
+    if st.button("+ New Chat"):
+        requests.post(
+            f"{API_BASE}/v1/chat/sessions",
+            params={"chat_type": "rag"},
+            headers=auth_headers(),
+        )
+        st.rerun()
 
-# ---------------------------------------------------------
-# File Selector
-# ---------------------------------------------------------
-file_map = {f"{f['filename']} ({f['id']})": f["id"] for f in files}
-selected_label = st.selectbox("Select a file to chat with:", list(file_map.keys()))
-file_id = file_map[selected_label]
+    resp = requests.get(
+        f"{API_BASE}/v1/chat/sessions",
+        headers=auth_headers(),
+    ).json()
 
-st.info(f"Chatting with: **{selected_label}**")
+    sessions = resp.get("data", [])
 
-# ---------------------------------------------------------
-# Chat Input
-# ---------------------------------------------------------
-query = st.text_input("Ask a question about this file:")
+    if "active_chat" not in st.session_state:
+        st.session_state.active_chat = sessions[0]["id"] if sessions else None
 
-if st.button("Ask AI"):
-    if not query.strip():
-        st.error("Please enter a question.")
-        st.stop()
+    for s in sessions:
+        if st.button(s["title"], key=s["id"]):
+            st.session_state.active_chat = s["id"]
+            st.rerun()
 
-    with st.spinner("Thinking..."):
-        try:
-            resp = requests.post(
-                f"{API_BASE}/v1/ask/file/{file_id}",
-                json={"question": query},
-            )
-        except Exception as e:
-            st.error(f"Request failed: {e}")
-            st.stop()
+    st.divider()
+    if st.button("🚪 Logout"):
+        logout()
 
-        if not resp.ok:
-            st.error(resp.text)
-            st.stop()
+# ------------------------------------
+# LOAD MESSAGES
+# ------------------------------------
+messages = []
+if st.session_state.active_chat:
+    msg_resp = requests.get(
+        f"{API_BASE}/v1/chat/sessions/{st.session_state.active_chat}/messages",
+        headers=auth_headers(),
+    ).json()
+    messages = msg_resp.get("data", [])
 
-        data = resp.json().get("data", {})
+for m in messages:
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
 
-        # -------------------------
-        # Render answer
-        # -------------------------
-        st.subheader("🧠 Answer")
-        st.write(data.get("answer", "No answer returned"))
+# ------------------------------------
+# INPUT
+# ------------------------------------
+prompt = st.chat_input("Ask a question...")
+
+if prompt:
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    res = requests.post(
+        f"{API_BASE}/v1/ask",
+        json={"query": prompt},
+        headers=auth_headers(),
+    ).json()
+
+    answer = res["data"]["answer"]
+
+    with st.chat_message("assistant"):
+        st.markdown(answer)
+
+    st.rerun()

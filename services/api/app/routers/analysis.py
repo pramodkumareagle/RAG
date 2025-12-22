@@ -1,10 +1,11 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from core.storage.postgres_client import execute
 import fitz  # PyMuPDF
-import json
 import os
 import requests
 import pandas as pd
+
+from services.api.app.auth.deps import get_current_user  # ✅ add this
 
 router = APIRouter()
 
@@ -16,12 +17,34 @@ MISTRAL_ENDPOINT = "https://api.mistral.ai/v1/chat/completions"
 
 
 # ------------------------------------------------------
-# Helper: Load extracted_rows into pandas DataFrame
+# Helper: verify file belongs to user
 # ------------------------------------------------------
-def load_rows_df(file_id: str) -> pd.DataFrame:
+def get_owned_file_or_404(file_id: str, user_id: str):
     rows = execute(
-        "SELECT id, table_name, row_data, created_at FROM extracted_rows WHERE file_id = %s",
-        (file_id,)
+        """
+        SELECT id, storage_path, content_type, doc_type, filename
+        FROM uploaded_files
+        WHERE id = %s AND user_id = %s
+        """,
+        (file_id, user_id),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="File not found")
+    return rows[0]
+
+
+# ------------------------------------------------------
+# Helper: Load extracted_rows into pandas DataFrame (scoped to user)
+# ------------------------------------------------------
+def load_rows_df(file_id: str, user_id: str) -> pd.DataFrame:
+    rows = execute(
+        """
+        SELECT id, table_name, row_data, created_at
+        FROM extracted_rows
+        WHERE file_id = %s AND user_id = %s
+        ORDER BY id ASC
+        """,
+        (file_id, user_id),
     )
 
     if not rows:
@@ -29,42 +52,32 @@ def load_rows_df(file_id: str) -> pd.DataFrame:
 
     records = []
     for r in rows:
-        try:
-            row_json = r["row_data"]
-        except:
-            row_json = {}
-
-        records.append({
-            "id": r["id"],
-            "table_name": r["table_name"],
-            "created_at": r["created_at"],
-            **row_json
-        })
+        row_json = r.get("row_data") or {}
+        records.append(
+            {
+                "id": r.get("id"),
+                "table_name": r.get("table_name"),
+                "created_at": r.get("created_at"),
+                **row_json,
+            }
+        )
 
     return pd.DataFrame(records)
 
 
 # ------------------------------------------------------
 # GET /v1/files/{file_id}/text
-# Extract plain text from PDF
+# Extract plain text from PDF (owned by user)
 # ------------------------------------------------------
 @router.get("/v1/files/{file_id}/text")
-async def get_file_text(file_id: str):
-    # fetch file info
-    file = execute(
-        "SELECT storage_path, content_type FROM uploaded_files WHERE id = %s",
-        (file_id,)
-    )
+async def get_file_text(file_id: str, user=Depends(get_current_user)):
+    file = get_owned_file_or_404(file_id=file_id, user_id=str(user["id"]))
 
-    if not file:
-        raise HTTPException(404, "File not found")
-
-    file = file[0]
     file_path = file["storage_path"]
     content_type = file["content_type"]
 
     if content_type != "application/pdf":
-        raise HTTPException(400, "Text extraction supported only for PDF")
+        raise HTTPException(status_code=400, detail="Text extraction supported only for PDF")
 
     try:
         text = ""
@@ -72,25 +85,26 @@ async def get_file_text(file_id: str):
             for page in pdf:
                 text += page.get_text()
 
-        return {"success": True, "data": text}
+        return {"success": True, "data": {"text": text}}
 
     except Exception as e:
-        raise HTTPException(500, f"PDF extraction failed: {e}")
+        raise HTTPException(status_code=500, detail=f"PDF extraction failed: {e}")
 
 
 # ------------------------------------------------------
 # /v1/analysis/summary
-# Numeric summary
+# Numeric summary (owned by user)
 # ------------------------------------------------------
 @router.get("/v1/analysis/summary")
-async def summary_stats(file_id: str):
-    df = load_rows_df(file_id)
+async def summary_stats(file_id: str, user=Depends(get_current_user)):
+    # ensures file belongs to user
+    _ = get_owned_file_or_404(file_id=file_id, user_id=str(user["id"]))
 
+    df = load_rows_df(file_id, user_id=str(user["id"]))
     if df.empty:
         return {"success": True, "data": {}}
 
     numeric_df = df.select_dtypes(include="number")
-
     if numeric_df.empty:
         return {"success": True, "data": {}}
 
@@ -99,26 +113,28 @@ async def summary_stats(file_id: str):
 
 # ------------------------------------------------------
 # /v1/analysis/descriptive
-# Placeholder descriptive stats
+# Placeholder descriptive stats (owned by user)
 # ------------------------------------------------------
 @router.get("/v1/analysis/descriptive")
-async def descriptive_stats(file_id: str, question: str):
-    df = load_rows_df(file_id)
+async def descriptive_stats(file_id: str, question: str, user=Depends(get_current_user)):
+    _ = get_owned_file_or_404(file_id=file_id, user_id=str(user["id"]))
 
+    df = load_rows_df(file_id, user_id=str(user["id"]))
     return {
         "success": True,
-        "data": f"Descriptive stats placeholder. Question: {question}, Rows: {len(df)}"
+        "data": f"Descriptive stats placeholder. Question: {question}, Rows: {len(df)}",
     }
 
 
 # ------------------------------------------------------
 # /v1/analysis/plots
-# Histogram data
+# Histogram data (owned by user)
 # ------------------------------------------------------
 @router.get("/v1/analysis/plots")
-async def histogram_plots(file_id: str):
-    df = load_rows_df(file_id)
+async def histogram_plots(file_id: str, user=Depends(get_current_user)):
+    _ = get_owned_file_or_404(file_id=file_id, user_id=str(user["id"]))
 
+    df = load_rows_df(file_id, user_id=str(user["id"]))
     if df.empty:
         return {"success": True, "data": {}}
 
@@ -129,26 +145,24 @@ async def histogram_plots(file_id: str):
         counts = df[col].value_counts()
         plots[col] = {
             "bins": list(counts.index),
-            "counts": list(counts.values)
+            "counts": list(counts.values),
         }
 
     return {"success": True, "data": plots}
 
 
 # ------------------------------------------------------
-# /v1/analysis/llm_summary  ← MISTRAL AI
+# /v1/analysis/llm_summary  ← MISTRAL AI (auth required)
+# Note: this is text-based, so we just protect it; it doesn't need file ownership
 # ------------------------------------------------------
 @router.post("/v1/analysis/llm_summary")
-async def llm_summary(payload: dict):
-    print("LLM Summary Payload:", payload)
-
-    text = payload.get("text", "")
-
+async def llm_summary(payload: dict, user=Depends(get_current_user)):
+    text = (payload or {}).get("text", "")
     if not text:
-        raise HTTPException(400, "No text provided")
+        raise HTTPException(status_code=400, detail="No text provided")
 
     if not MISTRAL_API_KEY:
-        raise HTTPException(500, "MISTRAL_API_KEY missing")
+        raise HTTPException(status_code=500, detail="MISTRAL_API_KEY missing")
 
     headers = {
         "Authorization": f"Bearer {MISTRAL_API_KEY}",
@@ -168,22 +182,15 @@ async def llm_summary(payload: dict):
                 ),
             },
         ],
-        "temperature": 0.4
+        "temperature": 0.4,
     }
 
     try:
-        res = requests.post(MISTRAL_ENDPOINT, headers=headers, json=body)
+        res = requests.post(MISTRAL_ENDPOINT, headers=headers, json=body, timeout=60)
         res.raise_for_status()
-
         answer = res.json()["choices"][0]["message"]["content"]
 
-        return {
-            "success": True,
-            "data": {
-                "summary": answer
-            }
-        }
+        return {"success": True, "data": {"summary": answer}}
 
     except Exception as e:
-        raise HTTPException(500, f"Mistral API error: {e}")
-
+        raise HTTPException(status_code=500, detail=f"Mistral API error: {e}")

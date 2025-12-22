@@ -1,40 +1,25 @@
-import os
 import streamlit as st
+from auth_api import login
 
-# Streamlit page config
-st.set_page_config(
-    page_title="Enterprise RAG UI",
-    page_icon="🤖",
-    layout="wide"
-)
+st.set_page_config(page_title="RAG Login", page_icon="🔐")
 
-# Read API_BASE from environment
-API_BASE = os.getenv("API_BASE", "http://localhost:8000")
+if "token" in st.session_state:
+    st.page_link("pages/1_Upload_File.py", label="🚀 Go to App")
+    st.stop()
 
-# Main landing page
-st.title("🤖 Enterprise RAG – Demo UI")
-st.write("Welcome! Use the left sidebar to navigate:")
+st.title("🔐 Login")
 
-st.markdown("""
-### 📤 Upload File
-Upload Excel/CSV/PDF/DOCX/TXT files.  
-The backend will parse tables and store them in PostgreSQL.
+email = st.text_input("Email")
+password = st.text_input("Password", type="password")
 
-### 💬 Chat with Data
-Ask structured questions (counts, lists, filters) or natural questions.  
-The backend will use **SQL for structured questions** and **RAG for text-based questions**.
-""")
+if st.button("Login"):
+    try:
+        res = login(email, password)
+        st.session_state["token"] = res["access_token"]
+        st.success("Login successful")
+        st.rerun()
+    except Exception as e:
+        st.error(str(e))
 
-# Show API status
-st.subheader("API Status")
-
-import requests
-
-try:
-    resp = requests.get(f"{API_BASE}/health")
-    if resp.ok:
-        st.success("Backend API is reachable 🎉")
-    else:
-        st.error(f"API responded with status: {resp.status_code}")
-except Exception as e:
-    st.error(f"Cannot reach API: {e}")
+st.divider()
+st.page_link("pages/Signup.py", label="Create new account →")
